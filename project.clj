@@ -11,7 +11,7 @@
                  [org.clojure/core.async "0.2.374"
                   :exclusions [org.clojure/tools.reader]]
                  [sablono "0.3.6"]
-                 [org.omcljs/om "0.9.0"]]
+                 [org.omcljs/om "0.9.0" :exclusions [cljsjs/react]]]
   
   :plugins [[lein-figwheel "0.5.3-1"]
             [lein-cljsbuild "1.1.3" :exclusions [[org.clojure/clojure]]]]

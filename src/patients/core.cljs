@@ -1,6 +1,7 @@
 (ns patients.core
   (:require [om.core :as om :include-macros true]
-            [om.dom :as dom :include-macros true]))
+            [om.dom :as dom :include-macros true]
+            [sablono.core :as html :refer-macros [html]]))
 
 (enable-console-print!)
 
@@ -40,20 +41,29 @@
   (sort-patients-by! field)
   (.stopPropagation e))
 
-(defn patients-headers [_ _]
+(defn glyph-class [data field]
+  (let [order-by (:order-by data)
+        reverse (:reverse data)]
+    (if (= field order-by)
+      (if reverse "glyphicon glyphicon-chevron-down" "glyphicon glyphicon-chevron-up")
+      "")))
+
+(defn patients-headers [data _]
   (om/component
    (dom/thead nil
               (dom/th nil "Id")
               (dom/th #js {:onClick #(handle-sort % :first)}
-                      "First name")
+                      "First name"
+                      (dom/span #js {:className (glyph-class data :first)}))
               (dom/th #js {:onClick #(handle-sort % :last)}
-                      "Last name")
+                      "Last name"
+                      (dom/span #js {:className (glyph-class data :last)}))
               (dom/th #js {:onClick #(handle-sort % :status)}
-                      "Status"))))
+                      "Status"
+                      (dom/span #js {:className (glyph-class data :status)})))))
 
 (defn patients-row [data owner]
   (om/component
-   (.log js/console "row")
    (dom/tr nil
            (dom/td nil (:id data))
            (dom/td nil (:first data))
@@ -72,19 +82,29 @@
   (reify
     om/IRender
     (render [_]
-      (dom/table nil
+      (dom/table #js {:className "patients table"}
                  (om/build patients-headers data)
                  (apply dom/tbody nil
-                        (om/build-all patients-row  (sort-by (:order-by data) (cmp (:reverse data)) (:patients data))
+                        (om/build-all patients-row
+                                      (sort-by (:order-by data) (cmp (:reverse data)) (:patients data))
                                       {:key :id}))))))
+
+(defn layout [data _]
+  (om/component
+   (html [:div.container
+          [:h1 "Patients"]
+          [:div.row
+           [:div.panel.panel-default
+            [:div.panel-heading "Patients"]
+            [:div.panel-body
+             (om/build patients-table data)]]]])))
 
 ;; Mount the application to the DOM
 (om/root
   (fn [data owner]
     (reify om/IRender
       (render [_]
-        (dom/h1 nil "Patients")
-        (om/build patients-table data))))
+        (om/build layout data))))
   app-state
   {:target (. js/document (getElementById "app"))})
 
@@ -103,8 +123,12 @@
      {:id 4 :first "name 4" :last "0 last name 4" :status "unknown"}
      {:id 5 :first "name 5" :last "f last name 5" :status "unknown"}
      ])
-  #_(load-patients! (sort-by :status  patients-data))
+  (load-patients! (sort-by :status  patients-data))
   (load-patients! patients-data)
   (swap! app-state assoc :order-by :status)
   (swap! app-state assoc :reverse false)
 )
+
+
+
+(load-patients! patients-data)
