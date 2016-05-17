@@ -11,7 +11,8 @@
 
 (defonce app-state (atom {:text "Hello world!"
                           :order-by :first
-                          :reverse false}))
+                          :reverse false
+                          :filter ""}))
 
 ;; Domain
 
@@ -34,6 +35,19 @@
     (do
       (reverse-order! false)
       (order-by! field))))
+
+(defn filter-patients! [term]
+  (swap! app-state assoc :filter term))
+
+(defn filter-fn [term]
+  (fn [patient]
+    (.info js/console "filter by " term)
+    (if (> (count term) 0)
+      (let [pat (re-pattern (str "(?i)" term))]
+        (or (re-find pat (:first patient))
+            (re-find pat (:last patient))
+            (re-find pat (:status patient))))
+      true)))
 
 ;; Views
 
@@ -64,6 +78,7 @@
 
 (defn patients-row [data owner]
   (om/component
+   (.info js/console "row")
    (dom/tr nil
            (dom/td nil (:id data))
            (dom/td nil (:first data))
@@ -78,6 +93,29 @@
     #(compare %2 %1)
     #(compare %1 %2)))
 
+(defn handle-search
+  "Basic implementation handled any firing event.
+  TODO: Add a channel to control timeouts, etc."
+  [e owner]
+  (let [term (.. e -target -value)]
+    (om/set-state! owner :text term)
+    (filter-patients! term))
+  (.stopPropagation e))
+
+(defn patients-filter [data owner]
+  (reify
+    om/IInitState
+    (init-state [_] {:text (:filter data)})
+    om/IRenderState
+    (render-state [this state]
+      (html [:div.row
+             [:form.col-xs-10.col-xs-offset-1
+              [:div.form-group
+               [:label "Filter"]
+               [:input.form-control {:type "search"
+                                     :value (:text state)
+                                     :on-change #(handle-search % owner)}]]]]))))
+
 (defn patients-table [data owner]
   (reify
     om/IRender
@@ -86,7 +124,9 @@
                  (om/build patients-headers data)
                  (apply dom/tbody nil
                         (om/build-all patients-row
-                                      (sort-by (:order-by data) (cmp (:reverse data)) (:patients data))
+                                      (sort-by (:order-by data) (cmp (:reverse data))
+                                               (filter (filter-fn (:filter data))
+                                                       (:patients data)))
                                       {:key :id}))))))
 
 (defn layout [data _]
@@ -97,7 +137,10 @@
            [:div.panel.panel-default
             [:div.panel-heading "Patients"]
             [:div.panel-body
-             (om/build patients-table data)]]]])))
+             [:div.row
+              (om/build patients-filter data)]
+             [:div.row
+              (om/build patients-table data)]]]]])))
 
 ;; Mount the application to the DOM
 (om/root
