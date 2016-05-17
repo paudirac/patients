@@ -151,6 +151,16 @@
   app-state
   {:target (. js/document (getElementById "app"))})
 
+(def patients-data
+  [
+   {:id 1 :first "name 1" :last "a last name 1" :status "critical"}
+   {:id 2 :first "name 2" :last "c last name 2" :status "critical"}
+   {:id 3 :first "name 3" :last "d last name 3" :status "good"}
+   {:id 4 :first "name 4" :last "0 last name 4" :status "unknown"}
+   {:id 5 :first "name 5" :last "f last name 5" :status "unknown"}
+   ])
+
+(load-patients! patients-data)
 
 (defn on-js-reload []
   ;; optionally touch your app-state to force rerendering depending on
@@ -158,20 +168,9 @@
   ;; (swap! app-state update-in [:__figwheel_counter] inc)
 
   ;; Test data
-  (def patients-data
-    [
-     {:id 1 :first "name 1" :last "a last name 1" :status "critical"}
-     {:id 2 :first "name 2" :last "c last name 2" :status "critical"}
-     {:id 3 :first "name 3" :last "d last name 3" :status "good"}
-     {:id 4 :first "name 4" :last "0 last name 4" :status "unknown"}
-     {:id 5 :first "name 5" :last "f last name 5" :status "unknown"}
-     ])
+  
   (load-patients! (sort-by :status  patients-data))
   (load-patients! patients-data)
   (swap! app-state assoc :order-by :status)
   (swap! app-state assoc :reverse false)
 )
-
-
-
-(load-patients! patients-data)
