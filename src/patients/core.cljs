@@ -1,7 +1,10 @@
 (ns patients.core
+  (:require-macros [cljs.core.async.macros :refer [go]])
   (:require [om.core :as om :include-macros true]
             [om.dom :as dom :include-macros true]
-            [sablono.core :as html :refer-macros [html]]))
+            [sablono.core :as html :refer-macros [html]]
+            [cljs-http.client :as http]
+            [cljs.core.async :refer [<! >! chan]]))
 
 (enable-console-print!)
 
@@ -12,7 +15,9 @@
 (defonce app-state (atom {:text "Hello world!"
                           :order-by :first
                           :reverse false
-                          :filter ""}))
+                          :filter ""
+                          :patients []
+                          :statuses []}))
 
 ;; Domain
 
@@ -20,6 +25,62 @@
   "Load patients to the application state"
   [patients]
   (swap! app-state assoc :patients patients))
+
+(defn load-statuses! [statuses]
+  (swap! app-state assoc :statuses statuses))
+
+(defn statuses-service->model [item]
+  {:id (:patient item)
+   :status (:status item)})
+
+(defn process-statuses [raw]
+  (let [stats (map statuses-service->model raw)]
+    (vec stats)))
+
+(defn show-error [msg]
+  (.error js/console msg))
+
+(defn find-patient-status [patient-id statuses]
+  (:status (first (filter (fn [s] (= patient-id (:id s))) statuses))))
+
+(defn patients-service->model [item]
+  {:first (:name item)
+   :last (:surname item)
+   :id (:id item)
+   :status (find-patient-status (:id item) (:statuses @app-state))
+   })
+
+(defn remove-duplicates [patients]
+  (let [keyvals (map (fn [p] [(:id p) p]) patients)
+        without-dups (apply hash-map keyvals)]
+    (vec (map second (vals without-dups)))))
+
+(defn process-patients-data [raw]
+  (let [patients-with-duplicates (map patients-service->model raw)]
+    (remove-duplicates patients-with-duplicates)))
+
+(defonce ^:private patients-url "https://demo3417391.mockable.io/patients")
+(defonce ^:private patients-status-url "https://demo3417391.mockable.io/patient_status")
+
+(defn request-statuses []
+  (let [out (chan)]
+    (go (let [response (<! (http/get patients-status-url {:with-credentials? false}))]
+          (if (= 200 (:status response))
+            (>! out (vec (:results (:body response))))
+            (>! out :error))))
+    out))
+
+(defn request-patients []
+  (go (let [statuses (<! (request-statuses))]
+        (if (not (= :error statuses))
+          (do
+            (load-statuses! (process-statuses statuses))
+            (let [response (<! (http/get patients-url {:with-credentials? false }))]
+              (if (= 200 (:status response))
+                (load-patients! (process-patients-data (:results (:body response))))
+                (show-error "no patients data"))))
+          (show-error "no status data")))))
+
 
 
 (defn order-by! [field]
@@ -41,13 +102,13 @@
 
 (defn filter-fn [term]
   (fn [patient]
-    (.info js/console "filter by " term)
     (if (> (count term) 0)
       (let [pat (re-pattern (str "(?i)" term))]
-        (or (re-find pat (:first patient))
-            (re-find pat (:last patient))
-            (re-find pat (:status patient))))
+        (or (and (not (empty? (:first patient))) (re-find pat (:first patient)))
+            (and (not (empty? (:last patient))) (re-find pat (:last patient)))
+            (and (not (empty? (:status patient))) (re-find pat (:status patient)))))
       true)))
+
 
 ;; Views
 
@@ -65,7 +126,9 @@
 (defn patients-headers [data _]
   (om/component
    (dom/thead nil
-              (dom/th nil "Id")
+              (dom/th #js {:onClick #(handle-sort % :id)}
+                      "Id"
+                      (dom/span #js {:className (glyph-class data :id)}))
               (dom/th #js {:onClick #(handle-sort % :first)}
                       "First name"
                       (dom/span #js {:className (glyph-class data :first)}))
@@ -78,7 +141,6 @@
 
 (defn patients-row [data owner]
   (om/component
-   (.info js/console "row")
    (dom/tr nil
            (dom/td nil (:id data))
            (dom/td nil (:first data))
@@ -160,7 +222,7 @@
    {:id 5 :first "name 5" :last "f last name 5" :status "unknown"}
    ])
 
-(load-patients! patients-data)
+(request-patients)
 
 (defn on-js-reload []
   ;; optionally touch your app-state to force rerendering depending on
@@ -168,9 +230,4 @@
   ;; (swap! app-state update-in [:__figwheel_counter] inc)
 
   ;; Test data
-  
-  (load-patients! (sort-by :status  patients-data))
-  (load-patients! patients-data)
-  (swap! app-state assoc :order-by :status)
-  (swap! app-state assoc :reverse false)
 )
