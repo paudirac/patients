@@ -12,12 +12,13 @@
 
 ;; define your app data so that it doesn't get over-written on reload
 
-(defonce app-state (atom {:text "Hello world!"
-                          :order-by :first
+(defonce app-state (atom {:order-by :id
                           :reverse false
                           :filter ""
                           :patients []
-                          :statuses []}))
+                          :statuses []
+                          :previous-page nil
+                          :next-page nil}))
 
 ;; Domain
 
@@ -44,20 +45,26 @@
   (:status (first (filter (fn [s] (= patient-id (:id s))) statuses))))
 
 (defn patients-service->model [item]
-  {:first (:name item)
-   :last (:surname item)
-   :id (:id item)
-   :status (find-patient-status (:id item) (:statuses @app-state))
-   })
+  (let [status (find-patient-status (:id item) (:statuses @app-state))]
+       {:first (:name item)
+        :last (:surname item)
+        :id (:id item)
+        :status status
+        }))
 
-(defn remove-duplicates [patients]
+#_(defn remove-duplicates [patients]
   (let [keyvals (map (fn [p] [(:id p) p]) patients)
         without-dups (apply hash-map keyvals)]
     (vec (map second (vals without-dups)))))
 
 (defn process-patients-data [raw]
-  (let [patients-with-duplicates (map patients-service->model raw)]
-    (remove-duplicates patients-with-duplicates)))
+  (let [next-page (:next_page raw)
+        previous-page (:previous_page raw)
+        patients-with-duplicates (map patients-service->model (:results raw))]
+    (swap! app-state assoc :next-page next-page)
+    (swap! app-state assoc :previous-page previous-page)
+    ;(remove-duplicates patients-with-duplicates)
+    patients-with-duplicates))
 
 (defonce ^:private patients-url "https://demo3417391.mockable.io/patients")
 (defonce ^:private patients-status-url "https://demo3417391.mockable.io/patient_status")
@@ -70,18 +77,30 @@
             (>! out :error))))
     out))
 
-(defn request-patients []
+(defn- mk-params [page]
+  (if (nil? page) {:page 1} {:page page}))
+
+(defn request-patients [page]
+  (let [out (chan)
+        query-params (mk-params page)]
+    (go
+      (let [response (<! (http/get patients-url {:with-credentials? false
+                                                 :query-params query-params}))]
+        (if (= 200 (:status response))
+          (>! out (:body response))
+          (>! out :error))))
+    out))
+
+(defn request-patients-and-status [page]
   (go (let [statuses (<! (request-statuses))]
-        (if (not (= :error statuses))
-          (do
-            (load-statuses! (process-statuses statuses))
-            (let [response (<! (http/get patients-url {:with-credentials? false }))]
-              (if (= 200 (:status response))
-                (load-patients! (process-patients-data (:results (:body response))))
-                (show-error "no patients data"))))
-          (show-error "no status data")))))
-
-
+         (if (not (= :error statuses))
+           (do
+             (load-statuses! (process-statuses statuses))
+             (let [patients (<! (request-patients page))]
+               (if (not (= :error patients))
+                 (load-patients! (process-patients-data patients))
+                 (show-error "no patients data"))))
+           (show-error "no status data")))))
 
 (defn order-by! [field]
   (swap! app-state assoc :order-by field))
@@ -90,7 +109,6 @@
   (swap! app-state assoc :reverse reverse))
 
 (defn sort-patients-by! [field]
-  (.info js/console "sort-by " (str field))
   (if (= field (:order-by @app-state))
     (reverse-order! (not (:reverse @app-state)))
     (do
@@ -108,7 +126,6 @@
             (and (not (empty? (:last patient))) (re-find pat (:last patient)))
             (and (not (empty? (:status patient))) (re-find pat (:status patient)))))
       true)))
-
 
 ;; Views
 
@@ -191,6 +208,30 @@
                                                        (:patients data)))
                                       {:key :id}))))))
 
+(defn handle-page [e page]
+  (when (not (nil? page))
+    (request-patients-and-status page))
+  (.stopPropagation e))
+
+(defn pagination [data owner]
+  (reify
+    om/IRender
+    (render [_]
+      (html [:div.col-xs-offset-5
+             [:nav.center
+              [:ul.pagination
+               [:li {:className (if (not (:previous-page data)) "disabled" "")}
+                [:a
+                 {:href "#"
+                  :aria-label "Previous"
+                  :on-click #(handle-page % (:previous-page data))}
+                 [:span {:aria-hidden true} "Previous"]]]
+               [:li {:className (if (not (:next-page data)) "disabled" "")}
+                [:a {:href "#"
+                      :aria-label "Next"
+                      :on-click #(handle-page % (:next-page data))}
+                 [:span {:aria-hidden true} "Next"]]]]]]))))
+
 (defn layout [data _]
   (om/component
    (html [:div.container
@@ -201,6 +242,8 @@
             [:div.panel-body
              [:div.row
               (om/build patients-filter data)]
+             [:div.row
+              (om/build pagination data)]
              [:div.row
               (om/build patients-table data)]]]]])))
 
@@ -213,16 +256,7 @@
   app-state
   {:target (. js/document (getElementById "app"))})
 
-(def patients-data
-  [
-   {:id 1 :first "name 1" :last "a last name 1" :status "critical"}
-   {:id 2 :first "name 2" :last "c last name 2" :status "critical"}
-   {:id 3 :first "name 3" :last "d last name 3" :status "good"}
-   {:id 4 :first "name 4" :last "0 last name 4" :status "unknown"}
-   {:id 5 :first "name 5" :last "f last name 5" :status "unknown"}
-   ])
-
-(request-patients)
+(request-patients-and-status 1)
 
 (defn on-js-reload []
   ;; optionally touch your app-state to force rerendering depending on
